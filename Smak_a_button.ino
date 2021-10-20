@@ -2,142 +2,158 @@
 // DOWNLOAD the MD_Parola library
 // https://github.com/MajicDesigns/MD_Parola
 
-#undef PAROLA
-
-#ifdef PAROLA
-#include <stdio.h>
-#include <MD_Parola.h>
-#include <MD_MAX72xx.h>
-#include <SPI.h>
-//#include "Parola_Fonts_data.h"
-#define HARDWARE_TYPE MD_MAX72XX::PAROLA_HW
-#define MAX_DEVICES 8
-#define CLK_PIN   13
-#define DATA_PIN  11
-#define CS_PIN    10
-MD_Parola P = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
-#endif
-
 #define kInvalid (-1)
 #define nLEDs (8)
-#define TimeLimitMS (600000)      // 60,000 ms == 60 seconds
+#define kMaxLitLEDs (nLEDs/2)
+#define GameTimeLimitMS (120 * 1000UL)      // 60,000 ms == 60 seconds
+#define kButtonPin A0
+#define kSpeedChangeIntervalMS 1000             // time between speed of play changes 
 
-uint32_t gameStartMS = 0;
-bool gameOver = false;
+enum GameState {gameNotStarted, gameRunning, gameOver};
+GameState gameState = gameNotStarted;
+uint32_t gameStateMS = 0;     // time that game state changed
+uint32_t gameScore = 0;
 
 char debugMsg[120];
-const int buttonPin = A0;
+
 int ledPins[nLEDs] = {2,3,4,5,6,7,8,9};
-uint32_t timeLitLED[nLEDs] = {0};
+uint32_t timeLitLEDMS[nLEDs] = {0};
 uint32_t buttonDownMS[nLEDs] = {0};
 uint32_t maxTimeLitMS = 2000;           // start out at 2000 ms (2 sec) max time LED is lit
 
 uint32_t totalResponseTimeMS = 0;
 uint32_t totalResponseCount = 0;
 
-uint32_t loopCount = 0;
-
-long randNumber;
-int button_values[nLEDs] = {920, 451, 295, 215, 165, 130, 99, 65};    // TODO: last 3 values TBD
+int button_values[nLEDs] = {920, 451, 295, 215, 165, 130, 99, 65};
 int button_tolerance[nLEDs] = {0};    // computed
-int p1_score = 0;
-int action_speed = 2000;
-int action_speed_min = 250;
+
+#define kStartActionInterval 500UL
+#define kMinActionInterval 100UL
+uint32_t actionIntervalMS = kStartActionInterval;      // interval between performing an action  
+uint32_t lastActionMS = 0;
+uint32_t lastSpeedChangeMS = 0;
 
 void setup()
 {
   Serial.begin(57600);
-  Serial.println("\n\n\nSTARTING GAME");
-  
-  gameStartMS = millis();       // game start time in milliseconds
+  Serial.println("\n\n\nSETUP GAME");
   
   randomSeed(generateRandomSeed());
   
-  pinMode(buttonPin, INPUT);
+  pinMode(kButtonPin, INPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
 
   for (int i=0; i<nLEDs; i++) {
     pinMode(ledPins[i], OUTPUT);
     turnOffLED(i);
 
+    // calculate button_tolerance so we can tell which button was pressed
     if (i < nLEDs-1) {
       button_tolerance[i] = (button_values[i] - button_values[i+1]) / 2;
     } else {
       button_tolerance[i] = button_tolerance[i-1];
     }    
-    sprintf(debugMsg, "button tolerance[%d] = %d", i, button_tolerance[i]);
+    sprintf(debugMsg, "button %d, nominal: %3d, tol: +/-%3d, min: %3d, max: %3d", 
+                       i, button_values[i], button_tolerance[i], 
+                       button_values[i]-button_tolerance[i],
+                       button_values[i]+button_tolerance[i]);
     Serial.println(debugMsg);
   }
 
-#ifdef PAROLA
-  P.begin(2);
-  P.setZone(0,0,3);
-  P.setZone(1,4,7);
-  P.displayZoneText(0, "abc", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-  P.setZoneEffect(0, true, PA_FLIP_UD);
-  P.displayZoneText(1, "abcd", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-  P.setZoneEffect(1, true, PA_FLIP_UD);
-  P.displayAnimate();
-#endif
+  gameStateMS = millis(); 
+  gameState = gameRunning;
+  
+  lastSpeedChangeMS = millis();
 }
 
 void loop()
 {
   uint32_t nowMS = millis();
-  
-  if (p1_score < 100) {
+
+  uint32_t gameTimeElapsedMS = nowMS - gameStateMS;
+
+  if (gameTimeElapsedMS >= GameTimeLimitMS) {
+    // time to end the game
+    gameState = gameOver;
+    gameStateMS = nowMS;
+  }
+
+  if (gameState == gameOver) {
+    // turn off all LEDs, game over
+    for (int i=0; i<nLEDs; i++) {
+      turnOffLED(i);
+    }
     
-    loopCount++;
-    bool step_action = false;
+    Serial.println(F("TIME IS UP -- GAME OVER"));
+    delay(1000);
     
-    if (loopCount > action_speed) {
-      loopCount = 0;
-      step_action = true;  
-      //action_speed = action_speed - round(action_speed/50);
-      action_speed = max(action_speed, action_speed_min);
-      Serial.println(action_speed);
+  } else if (gameState == gameRunning) {
 
-      // check game time limit
-      uint32_t gameTimeMS = nowMS - gameStartMS;
-      if (gameTimeMS >= TimeLimitMS) {
-        gameOver = true;
-
-        // turn off all LEDs, game over
-        for (int i=0; i<nLEDs; i++) {
-          turnOffLED(i);
-        }
-        
-        Serial.println(F("TIME'S UP -- GAME OVER"));
-        delay(100);
+    // check if it's time to speed up the game play
+    uint32_t speedChangeElapsedMS = nowMS - lastSpeedChangeMS;
+    
+    if (speedChangeElapsedMS > kSpeedChangeIntervalMS) {
+      // time to speed up the game, with some random variation,
+      // so that the timing is not predictable
+      int32_t intervalVariation = random(0, actionIntervalMS/5);     // vary interval by 20% (1/5th)
+      if (intervalVariation % 2 == 0) {
+        actionIntervalMS += intervalVariation;    // add variation
+      } else {
+        actionIntervalMS -= intervalVariation;    // subtract variation
       }
+      
+      actionIntervalMS -= actionIntervalMS / 50;                      // shorten the interval by 2% (1/50th)
+      actionIntervalMS = max(kMinActionInterval, actionIntervalMS);   // don't go below minimum interval
+      actionIntervalMS = min(kStartActionInterval, actionIntervalMS); // don't go above maximum interval
+      
+      sprintf(debugMsg, "speed change to %ld ms interval", actionIntervalMS);
+      Serial.println(debugMsg);
 
-      if (!gameOver) {
-        // pick another LED to light up
-        int which = random(0,nLEDs);
-
-        if (isOnLED(which)) {
-          // already ON, find the next one that is OFF
-          which = findOffLED(which);
-        }
+      // also reduce the length of time that the LEDs are lit,
+      // if we have enough reaction time data
+      if (totalResponseCount >= 3) {
+        uint32_t reactionTimeMS = totalResponseTimeMS / totalResponseCount;
+        // change the LED lit time to halfway between current and reactionTimeMS
+        uint32_t newLitLEDTimeMS = (reactionTimeMS + maxTimeLitMS) / 2;
+        sprintf(debugMsg, "reducing LED lit time from %ld ms to %ld ms", maxTimeLitMS, newLitLEDTimeMS);
+        Serial.println(debugMsg);
         
-        if (!isOnLED(which)) {
-          sprintf(debugMsg, "lighting up LED %d", which);
-          Serial.println(debugMsg);
-          turnOnLED(which);
-        }
+        maxTimeLitMS = newLitLEDTimeMS;
       }
+      
+      lastSpeedChangeMS = nowMS;
+    }
+    
+    // check if it's time for more action in the game play
+    uint32_t actionElapsedMS = nowMS - lastActionMS;    // elapsed MS since last action
+    
+    if (actionElapsedMS >= actionIntervalMS && nLEDsLit() < kMaxLitLEDs) {
+      // pick another LED to light up
+      int which = random(0,nLEDs);
+
+      if (isOnLED(which)) {
+        // already ON, find the next one that is OFF
+        which = findOffLED(which);
+      }
+      
+      sprintf(debugMsg, "lighting up LED %d", which);
+      Serial.println(debugMsg);
+      turnOnLED(which, nowMS);
+          
+      lastActionMS = nowMS;
     }
 
     // check for button presses
-    int whichButton = buttonPressed();
-
-    // mark button down time for all not pressed buttons to 0, 
+    int whichButton = getButtonPressed();
+  
+    // reset button down time for all NOT pressed buttons, reset it to 0, 
     // since they are not being pressed
     for (int i=0; i<nLEDs; i++) {
       if (i != whichButton) {
         buttonDownMS[i] = 0;      // button i is not pressed
       }
     }
-
+  
     // check to see if the button was already down,
     // we are only interested in a transition from up to down
     if (whichButton != kInvalid) {
@@ -150,83 +166,56 @@ void loop()
         buttonDownMS[whichButton] = nowMS;
       }
     }
-
-    // check to see if the button pressed also had its LED lit,
+  
+    // check to see if the button pressed has its LED lit,
     // if not, then it doesn't count for anything, bad button press
     if (whichButton != kInvalid && !isOnLED(whichButton)) {
+      sprintf(debugMsg, "OOPS: button %d pressed, but LED not lit", whichButton);
+      Serial.println(debugMsg);
       whichButton = kInvalid;
     }
     
     if (whichButton != kInvalid) {
       // one of the buttons was just pressed AND it's LED is ON, SCORE!!
-      uint32_t responseMS = nowMS - timeLitLED[whichButton];
-      totalResponseTimeMS += responseMS;
+      // calculate player's response time
+      uint32_t responseTimeMS = nowMS - timeLitLEDMS[whichButton];
+      totalResponseTimeMS += responseTimeMS;
       totalResponseCount++;
         
       turnOffLED(whichButton);
-      p1_score++;
-        
-      sprintf(debugMsg, "YAY! whacked on LED %d in %ld millisec, SCORE: %d", whichButton, responseMS, p1_score);
+      gameScore++;
+      
+      sprintf(debugMsg, "YAY! whacked on LED %d in %ld ms (avg %ld ms), SCORE: %d", 
+                        whichButton, 
+                        responseTimeMS, 
+                        totalResponseTimeMS / totalResponseCount, 
+                        gameScore);
       Serial.println(debugMsg);
     }
 
-    // check to see if any LEDs have been on long enough, if so, turn them off
+    // check to see how long each of the LEDs have been on, 
+    // if they reach their on time limit, turn them off
     for (int i=0; i<nLEDs; i++) {
-      if (timeLitLED[i] > 0) {
-        uint32_t elapsedMS = nowMS - timeLitLED[i];
+      if (timeLitLEDMS[i] > 0) {
+        uint32_t elapsedMS = nowMS - timeLitLEDMS[i];
         if (elapsedMS > maxTimeLitMS) {
+          //sprintf(debugMsg, "turning off LED %d after %d ms", i, elapsedMS);
+          //Serial.println(debugMsg);
           turnOffLED(i);
         }
       }
     }
+  } // end if (gameState == gameRunning)
   
- #ifdef PAROLA
-    if ( loopCount % 100 == 0){
-      char Score1[80];
-      sprintf(Score1, "%d", p1_score);
-      char *chrdisp[] = {Score1};
-  
-      char Score2[80];
-      sprintf(Score2, "%d", p2_score);
-      char *chrdisp2[] = {Score2};
-  
-      P.displayZoneText(0, chrdisp[0], PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-      P.displayZoneText(1, chrdisp2[0], PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-      P.displayAnimate();
-    }
- #endif
-  } else {
- #ifdef PAROLA
-    if (p1_score > p2_score) {
-      P.displayZoneText(0, "Winner", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-      P.displayZoneText(1, "Looser", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    } else {
-      P.displayZoneText(0, "Looser", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-      P.displayZoneText(1, "Winner", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    }
-    P.displayAnimate();  
-    delay(500);
-      char Score1[80];
-      sprintf(Score1, "%d", p1_score);
-      char *chrdisp[] = {Score1};
-  
-      char Score2[80];
-      sprintf(Score2, "%d", p2_score);
-      char *chrdisp2[] = {Score2};
-    P.displayZoneText(0, chrdisp[0], PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    P.displayZoneText(1, chrdisp2[0], PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);    
-    P.displayAnimate();
-    delay(500); 
-#endif       
-  }
-}
+}  // end loop()
+
 
 // reads the button port to figure out which button is pressed
 // returns the button number from 0 to N-1,
 // if no buttons are pressed returns kInvalid
-int buttonPressed() {
+int getButtonPressed() {
   // check to see which button is pressed (if any)
-  int analogValue = analogRead(buttonPin);
+  int analogValue = analogRead(kButtonPin);
 
   for (int i=0; i<nLEDs; i++) {
     int tolerance = button_tolerance[i];
@@ -240,6 +229,16 @@ int buttonPressed() {
   }
 
   return kInvalid;      // no button is pressed
+}
+
+unsigned nLEDsLit() {
+  unsigned nLit = 0;
+  for (int i=0; i<nLEDs; i++) {
+    if (timeLitLEDMS[i] > 0) {
+      nLit++;
+    }
+  }
+  return nLit;
 }
 
 int findOffLED(int which) {
@@ -263,17 +262,17 @@ boolean isOnLED(int which) {
   return false;
 }
 
-void turnOnLED(int which) {
+void turnOnLED(int which, uint32_t onTimeMS) {
   if (which >= 0 && which < nLEDs) {
     digitalWrite(ledPins[which], HIGH);
-    timeLitLED[which] = millis();
+    timeLitLEDMS[which] = onTimeMS;
   }
 }
 
 void turnOffLED(int which) {
   if (which >= 0 && which < nLEDs) {
     digitalWrite(ledPins[which], LOW);
-    timeLitLED[which] = 0;
+    timeLitLEDMS[which] = 0;
   }
 }
 
