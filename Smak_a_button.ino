@@ -1,23 +1,29 @@
 
 #define nLEDs (8)
-#define kStartTimeLitMS (2000UL)
 #define kMaxLitLEDs (nLEDs/2)
 #define GameTimeLimitMS (60 * 1000UL)      // 60,000 ms == 60 seconds
+#define kStartTimeLitMS (2000UL)
 #define kButtonPin A0
 #define kSpeakerPin 10
 #define kInvalid (-1)
+#define kSwitchBounceMS (50)    // source: https://www.eejournal.com/article/ultimate-guide-to-switch-debounce-part-4/
 
 enum GameState {gameNotStarted, gameRunning, gameOver};
 GameState gameState = gameNotStarted;
 uint32_t gameStateMS = 0;     // time that game state changed
-uint32_t gameScore = 0;
+uint32_t gameScore = 0;       // hit button while it was lit
+uint32_t escapedCount = 0;     // never hit button that was lit 
+uint32_t missedCount = 0;       // hit a button that wasn't lit
+uint32_t oopsCount = 0;
 
 char debugMsg[120];
 
 int ledPins[nLEDs] = {2,3,4,5,6,7,8,9};
 uint32_t timeLitLEDMS[nLEDs] = {0};
-uint32_t buttonDownMS[nLEDs] = {0};
 uint32_t maxTimeLitMS = kStartTimeLitMS;
+
+uint32_t buttonChangeMS[nLEDs] = {0};
+bool buttonIsDown[nLEDs] = {false};
 
 uint32_t totalResponseTimeMS = 0;
 uint32_t totalResponseCount = 0;
@@ -82,7 +88,7 @@ void loop()
     turnOnLED(0, nowMS);
     turnOnLED(1, nowMS);
     turnOnLED(2, nowMS);
-    tone(kSpeakerPin, 500, 700);
+    tone(kSpeakerPin, 500, 800);
     delay(1000);
     
     turnOffLED(2);
@@ -90,17 +96,22 @@ void loop()
     delay(1000);
     
     turnOffLED(1);
-    tone(kSpeakerPin, 1500, 700);
+    tone(kSpeakerPin, 1500, 500);
     delay(1000);
     
     turnOffLED(0);
-    tone(kSpeakerPin, 2000, 200);
+    tone(kSpeakerPin, 2000, 100);
+    delay(100);
+    tone(kSpeakerPin, 2500, 100);
     
     // reset all the game state variables
     nowMS = millis();
     gameState = gameRunning;
     gameStateMS = nowMS;
     gameScore = 0;
+    oopsCount = 0;
+    missedCount = 0;
+    escapedCount = 0;
     lastSpeedChangeMS = nowMS;
     lastActionMS = nowMS;
     actionIntervalMS = kStartActionIntervalMS;
@@ -112,7 +123,7 @@ void loop()
     //--------------------------------------------
     // GAME OVER
     //--------------------------------------------
-    sprintf(debugMsg, "--- GAME OVER -- SCORE: %d ---", gameScore);
+    sprintf(debugMsg, "GAME OVER --- SCORED: %lu -- MISSED: %lu -- ESCAPED: %lu", gameScore, missedCount, escapedCount);
     Serial.println(debugMsg);
     
     for (int i=0; i<nLEDs; i++) {
@@ -139,13 +150,14 @@ void loop()
       // time to end the game
       gameState = gameOver;
       gameStateMS = nowMS;
-
-      tone(kSpeakerPin, 300, 2000);
       
       // turn off all LEDs, game over
       for (int i=0; i<nLEDs; i++) {
         turnOffLED(i);
       }
+
+      tone(kSpeakerPin, 300, 2000);
+
       return;   // --- RETURN --- exit loop(), gameState changed
     }
     
@@ -166,19 +178,28 @@ void loop()
       actionIntervalMS = max(kMinActionIntervalMS, actionIntervalMS);   // don't go below minimum interval
       actionIntervalMS = min(kStartActionIntervalMS, actionIntervalMS); // don't go above maximum interval
       
-      sprintf(debugMsg, "speed change to %ld ms interval", actionIntervalMS);
-      Serial.println(debugMsg);
+      //sprintf(debugMsg, "speed change to %lu ms interval", actionIntervalMS);
+      //Serial.println(debugMsg);
 
-      // also reduce the length of time that the LEDs are lit,
-      // if we have enough reaction time data
-      if (totalResponseCount >= 3) {
-        uint32_t reactionTimeMS = totalResponseTimeMS / totalResponseCount;
-        // change the LED lit time to halfway between current and reactionTimeMS
-        uint32_t newLitLEDTimeMS = (reactionTimeMS + maxTimeLitMS) / 2;
-        sprintf(debugMsg, "reducing LED lit time from %ld ms to %ld ms", maxTimeLitMS, newLitLEDTimeMS);
+      if (oopsCount >= 3 && maxTimeLitMS < kStartTimeLitMS) {
+        // increase time that LEDs are lit, 
+        // player is hitting button too late
+        uint32_t newTimeLitMS = maxTimeLitMS + 200;
+        sprintf(debugMsg, "increasing LED lit time from %lu to %lu ms", maxTimeLitMS, newTimeLitMS);
         Serial.println(debugMsg);
-        
-        maxTimeLitMS = newLitLEDTimeMS;
+        maxTimeLitMS = newTimeLitMS;
+        oopsCount = 0;    
+
+      } else if (totalResponseCount >= 3 && oopsCount == 0) {
+        // shorten LED on time, change them to
+        // halfway between current and reactionTimeMS
+        uint32_t reactionTimeMS = totalResponseTimeMS / totalResponseCount;
+        uint32_t newTimeLitMS = (reactionTimeMS + maxTimeLitMS) / 2;
+        if (newTimeLitMS < maxTimeLitMS && newTimeLitMS >= kSwitchBounceMS*3) {
+          sprintf(debugMsg, "reducing LED lit time from %lu to %lu ms", maxTimeLitMS, newTimeLitMS);
+          Serial.println(debugMsg);
+          maxTimeLitMS = newTimeLitMS;
+        }
       }
       
       lastSpeedChangeMS = nowMS;
@@ -186,6 +207,7 @@ void loop()
     
     // check if it's time for more action in the game play
     uint32_t actionElapsedMS = nowMS - lastActionMS;    // elapsed MS since last action
+    bool changedLEDs = false;
     
     if (actionElapsedMS >= actionIntervalMS && nLEDsLit() < kMaxLitLEDs) {
       // pick another LED to light up
@@ -196,75 +218,121 @@ void loop()
         which = findOffLED(which);
       }
       
-      sprintf(debugMsg, "lighting up LED %d", which);
-      Serial.println(debugMsg);
       turnOnLED(which, nowMS);
-          
+      changedLEDs = true;
       lastActionMS = nowMS;
     }
 
     // check for button presses
     int whichButton = getButtonPressed();
-  
-    // reset button down time for all NOT pressed buttons, reset it to 0, 
-    // since they are not being pressed
-    for (int i=0; i<nLEDs; i++) {
-      if (i != whichButton) {
-        buttonDownMS[i] = 0;      // button i is not pressed
-      }
+
+    if (whichButton != kInvalid) {
+      //sprintf(debugMsg, "--- button press %d", whichButton);
+      //Serial.println(debugMsg);
     }
-  
+
+    // check to see if buttons released or pressed, 
+    // also check to see if these changes are switch bounces
+    for (int i=0; i<nLEDs; i++) {
+      // if button change happened too soon, it is switch bounce
+      const bool isDown = (i==whichButton);
+      const bool buttonChanged = isDown != buttonIsDown[i];
+      if (buttonChanged) {
+        const uint32_t elapsedChangeMS = nowMS - buttonChangeMS[i];
+        if (elapsedChangeMS <= kSwitchBounceMS) { 
+          // bounce detected, ignore this change
+          if (i==whichButton) {
+            whichButton = kInvalid;   // ignore button down, it's a bounce detected
+          }
+        } else {
+          // change is not a switch bounce
+          buttonIsDown[i] = isDown;
+          buttonChangeMS[i] = nowMS;
+        }
+      }
+      
+      if (!buttonChanged && isDown) {
+        // button is still down, ignore this button press, it's not new
+        whichButton = kInvalid;
+        //Serial.println(F("*** ignoring button still down"));
+     }
+    }
+
     // check to see if the button was already down,
     // we are only interested in a transition from up to down
     if (whichButton != kInvalid) {
-      if (buttonDownMS[whichButton] != 0) {
-        // button was already pressed, so ignore that it is still pressed
-        whichButton = kInvalid;
+      // button was up last time, now it is down, valid transition
+      // we have a valid button press (not a bounce)
+      Serial.println(F("+++ valid button press"));
+
+      // valid button press, that's a point score if the LED was on
+      if (isOnLED(whichButton)) {
+        // one of the buttons was just pressed AND it's LED is ON, SCORE!!
+        // calculate player's reaction (response) time
+        uint32_t responseTimeMS = nowMS - timeLitLEDMS[whichButton];
+        totalResponseTimeMS += responseTimeMS;
+        totalResponseCount++;
+
+        turnOffLED(whichButton);
+        gameScore++;
+        oopsCount = 0;    // reset oops score
+  
+        // happy sound beep, two rising high pitched tones
+        const int kBeepDuration = 80;
+        tone(kSpeakerPin, 1000, kBeepDuration);
+        delay(kBeepDuration);
+        tone(kSpeakerPin, 2000, kBeepDuration);
+  
+        sprintf(debugMsg, "YAY! whacked on LED %d in %lu ms (avg %lu ms), SCORE: %lu", 
+                          whichButton, 
+                          responseTimeMS, 
+                          totalResponseTimeMS / totalResponseCount, 
+                          gameScore);
+        Serial.println(debugMsg);
+
       } else {
-        // button was not pressed, now it is pressed, valid transition
-        // record what time it was pressed
-        buttonDownMS[whichButton] = nowMS;
+        // Oops, LED was NOT on, player doesn't get any points for this
+        // but if this happens a lot, we let the LEDs stay on longer to give player a chance
+        oopsCount++;
+        missedCount++;
+        sprintf(debugMsg, "OOPS #%lu: button %d pressed, but LED not lit", oopsCount, whichButton);
+        Serial.println(debugMsg);
+        
+        // sad sound beep, two descending low pitched tones
+        const int kBeepDuration = 80;
+        tone(kSpeakerPin, 300, kBeepDuration);
+        delay(kBeepDuration);
+        tone(kSpeakerPin, 200, kBeepDuration);
       }
     }
-  
-    // check to see if the button pressed has its LED lit,
-    // if not, then it doesn't count for anything, bad button press
-    if (whichButton != kInvalid && !isOnLED(whichButton)) {
-      sprintf(debugMsg, "OOPS: button %d pressed, but LED not lit", whichButton);
-      Serial.println(debugMsg);
-      whichButton = kInvalid;
-    }
     
-    if (whichButton != kInvalid) {
-      // one of the buttons was just pressed AND it's LED is ON, SCORE!!
-      // calculate player's response time
-      uint32_t responseTimeMS = nowMS - timeLitLEDMS[whichButton];
-      totalResponseTimeMS += responseTimeMS;
-      totalResponseCount++;
-        
-      turnOffLED(whichButton);
-      gameScore++;
-      tone(kSpeakerPin, 1000, 250);
-
-      sprintf(debugMsg, "YAY! whacked on LED %d in %ld ms (avg %ld ms), SCORE: %d", 
-                        whichButton, 
-                        responseTimeMS, 
-                        totalResponseTimeMS / totalResponseCount, 
-                        gameScore);
-      Serial.println(debugMsg);
-    }
-
     // check to see how long each of the LEDs have been on, 
-    // if they reach their on time limit, turn them off
+    // if an LED reaches its time limit, turn it off
     for (int i=0; i<nLEDs; i++) {
       if (timeLitLEDMS[i] > 0) {
         uint32_t elapsedMS = nowMS - timeLitLEDMS[i];
         if (elapsedMS > maxTimeLitMS) {
-          //sprintf(debugMsg, "turning off LED %d after %d ms", i, elapsedMS);
-          //Serial.println(debugMsg);
+          // LED was lit, but button never got hit, turn it off
+          escapedCount++;
           turnOffLED(i);
+          changedLEDs = true;
         }
       }
+    }
+
+    if (changedLEDs) {
+      // print out list of lit LEDs
+      strcpy(debugMsg, "current LEDs lit: ");
+      for (int i=0; i<nLEDs; i++) {
+        if (timeLitLEDMS[i] > 0) {
+          char tmp[8];
+          sprintf (tmp, "%2d", i);
+          strcat(debugMsg, tmp);
+        } else {
+          strcat(debugMsg, "  ");
+        }
+      }
+      Serial.println(debugMsg);
     }
   } // end if (gameState == gameRunning)
   
