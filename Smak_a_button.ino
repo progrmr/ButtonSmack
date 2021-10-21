@@ -4,6 +4,7 @@
 #define kMaxLitLEDs (nLEDs/2)
 #define GameTimeLimitMS (60 * 1000UL)      // 60,000 ms == 60 seconds
 #define kButtonPin A0
+#define kSpeakerPin 10
 #define kInvalid (-1)
 
 enum GameState {gameNotStarted, gameRunning, gameOver};
@@ -81,13 +82,20 @@ void loop()
     turnOnLED(0, nowMS);
     turnOnLED(1, nowMS);
     turnOnLED(2, nowMS);
+    tone(kSpeakerPin, 500, 700);
     delay(1000);
+    
     turnOffLED(2);
+    tone(kSpeakerPin, 1000, 700);
     delay(1000);
+    
     turnOffLED(1);
+    tone(kSpeakerPin, 1500, 700);
     delay(1000);
+    
     turnOffLED(0);
-
+    tone(kSpeakerPin, 2000, 200);
+    
     // reset all the game state variables
     nowMS = millis();
     gameState = gameRunning;
@@ -131,7 +139,9 @@ void loop()
       // time to end the game
       gameState = gameOver;
       gameStateMS = nowMS;
-  
+
+      tone(kSpeakerPin, 300, 2000);
+      
       // turn off all LEDs, game over
       for (int i=0; i<nLEDs; i++) {
         turnOffLED(i);
@@ -234,7 +244,8 @@ void loop()
         
       turnOffLED(whichButton);
       gameScore++;
-      
+      tone(kSpeakerPin, 1000, 250);
+
       sprintf(debugMsg, "YAY! whacked on LED %d in %ld ms (avg %ld ms), SCORE: %d", 
                         whichButton, 
                         responseTimeMS, 
