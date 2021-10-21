@@ -1,13 +1,10 @@
-// IMPORTANT!
-// DOWNLOAD the MD_Parola library
-// https://github.com/MajicDesigns/MD_Parola
 
-#define kInvalid (-1)
 #define nLEDs (8)
+#define kStartTimeLitMS (2000UL)
 #define kMaxLitLEDs (nLEDs/2)
-#define GameTimeLimitMS (120 * 1000UL)      // 60,000 ms == 60 seconds
+#define GameTimeLimitMS (60 * 1000UL)      // 60,000 ms == 60 seconds
 #define kButtonPin A0
-#define kSpeedChangeIntervalMS 1000             // time between speed of play changes 
+#define kInvalid (-1)
 
 enum GameState {gameNotStarted, gameRunning, gameOver};
 GameState gameState = gameNotStarted;
@@ -19,7 +16,7 @@ char debugMsg[120];
 int ledPins[nLEDs] = {2,3,4,5,6,7,8,9};
 uint32_t timeLitLEDMS[nLEDs] = {0};
 uint32_t buttonDownMS[nLEDs] = {0};
-uint32_t maxTimeLitMS = 2000;           // start out at 2000 ms (2 sec) max time LED is lit
+uint32_t maxTimeLitMS = kStartTimeLitMS;
 
 uint32_t totalResponseTimeMS = 0;
 uint32_t totalResponseCount = 0;
@@ -27,9 +24,11 @@ uint32_t totalResponseCount = 0;
 int button_values[nLEDs] = {920, 451, 295, 215, 165, 130, 99, 65};
 int button_tolerance[nLEDs] = {0};    // computed
 
-#define kStartActionInterval 500UL
-#define kMinActionInterval 100UL
-uint32_t actionIntervalMS = kStartActionInterval;      // interval between performing an action  
+#define kStartActionIntervalMS 500UL
+#define kMinActionIntervalMS 100UL
+uint32_t actionIntervalMS = kStartActionIntervalMS;      // interval between performing an action  
+
+#define kSpeedChangeIntervalMS 1000             // time between speed of play changes 
 uint32_t lastActionMS = 0;
 uint32_t lastSpeedChangeMS = 0;
 
@@ -60,35 +59,86 @@ void setup()
     Serial.println(debugMsg);
   }
 
-  gameStateMS = millis(); 
-  gameState = gameRunning;
+  uint32_t nowMS = millis();
+  gameStateMS = nowMS; 
+  gameState = gameNotStarted;
   
-  lastSpeedChangeMS = millis();
+  lastSpeedChangeMS = nowMS;
 }
 
 void loop()
 {
   uint32_t nowMS = millis();
+  uint32_t elapsedInStateMS = nowMS - gameStateMS;
+  
+  //---------------------------------------------
+  // Perform game action based on game state
+  //
+  if (gameState == gameNotStarted) {
+    //--------------------------------------------
+    // NEW GAME STARTING
+    //--------------------------------------------
+    turnOnLED(0, nowMS);
+    turnOnLED(1, nowMS);
+    turnOnLED(2, nowMS);
+    delay(1000);
+    turnOffLED(2);
+    delay(1000);
+    turnOffLED(1);
+    delay(1000);
+    turnOffLED(0);
 
-  uint32_t gameTimeElapsedMS = nowMS - gameStateMS;
-
-  if (gameTimeElapsedMS >= GameTimeLimitMS) {
-    // time to end the game
-    gameState = gameOver;
+    // reset all the game state variables
+    nowMS = millis();
+    gameState = gameRunning;
     gameStateMS = nowMS;
-  }
-
-  if (gameState == gameOver) {
-    // turn off all LEDs, game over
+    gameScore = 0;
+    lastSpeedChangeMS = nowMS;
+    lastActionMS = nowMS;
+    actionIntervalMS = kStartActionIntervalMS;
+    maxTimeLitMS = kStartTimeLitMS;
+    totalResponseTimeMS = 0;
+    totalResponseCount = 0;
+    
+  } else if (gameState == gameOver) {
+    //--------------------------------------------
+    // GAME OVER
+    //--------------------------------------------
+    sprintf(debugMsg, "--- GAME OVER -- SCORE: %d ---", gameScore);
+    Serial.println(debugMsg);
+    
     for (int i=0; i<nLEDs; i++) {
+      if (gameState == gameOver) {
+        // check for button presses to start a new game
+        int whichButton = getButtonPressed();
+        if (whichButton != kInvalid) {
+          gameState = gameNotStarted;
+        }
+      }
+      
+      // flash the next LED in sequence
+      turnOnLED(i, nowMS);
+      delay(100);
       turnOffLED(i);
     }
     
-    Serial.println(F("TIME IS UP -- GAME OVER"));
-    delay(1000);
-    
   } else if (gameState == gameRunning) {
-
+    //--------------------------------------------
+    // GAME RUNNING
+    //--------------------------------------------
+    // check to see if it's time to end the game
+    if (elapsedInStateMS >= GameTimeLimitMS) {
+      // time to end the game
+      gameState = gameOver;
+      gameStateMS = nowMS;
+  
+      // turn off all LEDs, game over
+      for (int i=0; i<nLEDs; i++) {
+        turnOffLED(i);
+      }
+      return;   // --- RETURN --- exit loop(), gameState changed
+    }
+    
     // check if it's time to speed up the game play
     uint32_t speedChangeElapsedMS = nowMS - lastSpeedChangeMS;
     
@@ -102,9 +152,9 @@ void loop()
         actionIntervalMS -= intervalVariation;    // subtract variation
       }
       
-      actionIntervalMS -= actionIntervalMS / 50;                      // shorten the interval by 2% (1/50th)
-      actionIntervalMS = max(kMinActionInterval, actionIntervalMS);   // don't go below minimum interval
-      actionIntervalMS = min(kStartActionInterval, actionIntervalMS); // don't go above maximum interval
+      actionIntervalMS -= actionIntervalMS / 50;                        // shorten the interval by 2% (1/50th)
+      actionIntervalMS = max(kMinActionIntervalMS, actionIntervalMS);   // don't go below minimum interval
+      actionIntervalMS = min(kStartActionIntervalMS, actionIntervalMS); // don't go above maximum interval
       
       sprintf(debugMsg, "speed change to %ld ms interval", actionIntervalMS);
       Serial.println(debugMsg);
