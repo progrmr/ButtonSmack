@@ -14,8 +14,8 @@
 const int ledPins[nLEDs] = {2,3,4,5,6,7,8,9};
 
 // input button(s) voltage values
-int button_values[nLEDs] = {920, 451, 295, 215, 165, 130, 99, 65};
-int button_tolerance[nLEDs] = {0};    // computed
+uint16_t buttonValues[nLEDs] = {920, 451, 295, 215, 165, 130, 99, 65};
+uint16_t buttonTolerance[nLEDs] = {0};    // computed
 
 // Game State and scoring data
 enum GameState {gameNotStarted, gameRunning, gameOver};
@@ -64,17 +64,17 @@ void setup()
     pinMode(ledPins[i], OUTPUT);
     turnOffLED(i);
 
-    // calculate button_tolerance so we can tell which button was pressed
+    // calculate buttonTolerance so we can tell which button was pressed
     if (i < nLEDs-1) {
-      button_tolerance[i] = (button_values[i] - button_values[i+1]) / 2;
+      buttonTolerance[i] = (buttonValues[i] - buttonValues[i+1]) / 2;
     } else {
-      button_tolerance[i] = button_tolerance[i-1];
+      buttonTolerance[i] = buttonTolerance[i-1];
     }    
 #ifdef DEBUG
     sprintf(debugMsg, "button %d, nominal: %3d, tol: +/-%3d, min: %3d, max: %3d", 
-                       i, button_values[i], button_tolerance[i], 
-                       button_values[i]-button_tolerance[i],
-                       button_values[i]+button_tolerance[i]);
+                       i, buttonValues[i], buttonTolerance[i], 
+                       buttonValues[i]-buttonTolerance[i],
+                       buttonValues[i]+buttonTolerance[i]);
     Serial.println(debugMsg);
 #endif
   }
@@ -242,13 +242,6 @@ void loop()
     // check for button presses
     int whichButton = getButtonPressed();
 
-#ifdef DEBUG
-    if (whichButton != kInvalid) {
-      sprintf(debugMsg, "--- button press %d", whichButton);
-      Serial.println(debugMsg);
-    }
-#endif
-
     // check to see if buttons released or pressed, 
     // also check to see if these changes are switch bounces
     for (int i=0; i<nLEDs; i++) {
@@ -374,19 +367,23 @@ void loop()
 // if no buttons are pressed returns kInvalid
 int getButtonPressed() {
   // check to see which button is pressed (if any)
-  int analogValue = analogRead(kButtonPin);
+  uint16_t analogValue = analogRead(kButtonPin);
 
   for (int i=0; i<nLEDs; i++) {
-    int tolerance = button_tolerance[i];
-    int minValue = button_values[i] - tolerance;
-    int maxValue = button_values[i] + tolerance;
+    uint16_t tolerance = buttonTolerance[i];
+    uint16_t minValue = buttonValues[i] - tolerance;
+    uint16_t maxValue = buttonValues[i] + tolerance;
 
-    bool isPressed = ( analogValue > minValue and analogValue < maxValue );
+    bool isPressed = ( analogValue >= minValue and analogValue <= maxValue );
     if (isPressed) {
+#ifdef DEBUG
+      sprintf(debugMsg, "--- button press %d (value %d, exp %d, allow %d-%d)",
+              i, analogValue, buttonValues[i], minValue, maxValue);
+      Serial.println(debugMsg);
+#endif
       return i;
     }
   }
-
   return kInvalid;      // no button is pressed
 }
 
