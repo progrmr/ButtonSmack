@@ -24,6 +24,7 @@
 //---------------------------------------------------------------
 #define DEBUG 1
 //#define CALIBRATE 1
+//#define PAROLA
 
 #define nLEDs (8)
 #define kMaxLitLEDs (nLEDs/2)
@@ -32,9 +33,24 @@
 #define kInvalid (-1)
 #define kSwitchBounceMS (20)    // source: https://www.eejournal.com/article/ultimate-guide-to-switch-debounce-part-4/
 
+#ifdef PAROLA
+#include <stdio.h>
+#include <MD_Parola.h>
+#include <MD_MAX72xx.h>
+#include <SPI.h>
+//#include "Parola_Fonts_data.h"
+#define HARDWARE_TYPE MD_MAX72XX::PAROLA_HW
+#define MAX_DEVICES 8
+#define CLK_PIN   13
+#define DATA_PIN  11
+#define CS_PIN    10
+#define kScoreUpdateIntervalMS (50)
+MD_Parola P = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
+#endif
+
 // Arduino pin definitions
 #define kButtonPin A0
-#define kSpeakerPin 10
+#define kSpeakerPin A5
 const int ledPins[nLEDs] = {2,3,4,5,6,7,8,9};
 
 // input button(s) voltage values
@@ -83,7 +99,8 @@ void setup()
   
   pinMode(kButtonPin, INPUT);
   pinMode(LED_BUILTIN, OUTPUT);
-
+  pinMode(kSpeakerPin, OUTPUT);
+  
   for (int i=0; i<nLEDs; i++) {
     pinMode(ledPins[i], OUTPUT);
     turnOffLED(i);
@@ -102,6 +119,17 @@ void setup()
     Serial.println(debugMsg);
 #endif
   }
+
+#ifdef PAROLA
+  P.begin(2);
+  P.setZone(0,0,3);
+  P.setZone(1,4,7);
+  P.displayZoneText(0, "abc", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+  P.setZoneEffect(0, true, PA_FLIP_UD);
+  P.displayZoneText(1, "abcd", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+  P.setZoneEffect(1, true, PA_FLIP_UD);
+  P.displayAnimate();
+#endif
 
   uint32_t nowMS = millis();
   gameStateMS = nowMS; 
@@ -184,9 +212,34 @@ void loop()
       turnOffLED(i);
       delay(50);
     }
+
+#ifdef PAROLA
+    if (gameScore > escapedCount) {
+      P.displayZoneText(0, "Winner", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      P.displayZoneText(1, "Loser",  PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    } else {
+      P.displayZoneText(0, "Loser",  PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      P.displayZoneText(1, "Winner", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    }
+    P.displayAnimate();  
+    delay(500);
+    
+    char score1[8];
+    sprintf(score1, "%d", gameScore);
+    char score2[8];
+    sprintf(score2, "%d", escapedCount);
+    
+    P.displayZoneText(0, score1, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayZoneText(1, score2, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);    
+    P.displayAnimate();
+#endif   
+    
     delay(500);
 
   } else if (gameState == buttonCalibration) {
+    //--------------------------------------------
+    // BUTTON CALIBRATION CHECK
+    //--------------------------------------------
     static uint32_t lastButtonCalMS = 0;
     uint32_t elapsedButtonCal = nowMS - lastButtonCalMS;
     if (elapsedButtonCal >= 250) {
@@ -394,6 +447,23 @@ void loop()
       Serial.println(debugMsg);
     }
 #endif
+
+#ifdef PAROLA
+    static uint32_t lastScoreUpdateMS = 0;
+    uint32_t elapsedSinceScoreUpdateMS = nowMS - lastScoreUpdateMS;
+    
+    if (elapsedSinceScoreUpdateMS >= kScoreUpdateIntervalMS) {
+      char score1[8];
+      sprintf(score1, "%d", gameScore);
+  
+      char score2[8];
+      sprintf(score2, "%d", escapedCount);
+  
+      P.displayZoneText(0, score1, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      P.displayZoneText(1, score2, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      P.displayAnimate();
+    }
+ #endif
 
   } // end if (gameState == gameRunning)
   
