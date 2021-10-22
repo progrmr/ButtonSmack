@@ -39,7 +39,8 @@
 #include <MD_MAX72xx.h>
 #include <SPI.h>
 //#include "Parola_Fonts_data.h"
-#define HARDWARE_TYPE MD_MAX72XX::FC16_HW
+#define HARDWARE_TYPE MD_MAX72XX::FC16_HW   // product from Amazon
+//#define HARDWARE_TYPE MD_MAX72XX::ICSTATION_HW    // display from banggood.com
 #define MAX_DEVICES 4
 #define CLK_PIN   13
 #define DATA_PIN  11
