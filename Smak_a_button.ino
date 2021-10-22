@@ -1,4 +1,3 @@
-
 //---------------------------------------------------------------
 //
 // Single Player Whack-a-Mole style game 
@@ -24,6 +23,7 @@
 // NOTE2: comment out the "#define DEBUG 1" line below for final deployment after testing is done.
 //---------------------------------------------------------------
 #define DEBUG 1
+#define CALIBRATE 1
 
 #define nLEDs (8)
 #define kMaxLitLEDs (nLEDs/2)
@@ -42,7 +42,7 @@ uint16_t buttonValues[nLEDs] = {920, 451, 295, 215, 165, 130, 99, 65};
 uint16_t buttonTolerance[nLEDs] = {0};    // computed
 
 // Game State and scoring data
-enum GameState {gameNotStarted, gameRunning, gameOver};
+enum GameState {gameNotStarted, gameRunning, gameOver, buttonCalibration};
 GameState gameState = gameNotStarted;
 uint32_t gameStateMS = 0;     // time that game state changed
 uint32_t gameScore = 0;       // hit button while it was lit
@@ -105,8 +105,12 @@ void setup()
 
   uint32_t nowMS = millis();
   gameStateMS = nowMS; 
+#ifdef CALIBRATE
+  gameState = buttonCalibration;
+#else 
   gameState = gameNotStarted;
-  
+#endif
+
   lastSpeedChangeMS = nowMS;
 }
 
@@ -181,7 +185,15 @@ void loop()
       delay(50);
     }
     delay(500);
-    
+
+  } else if (gameState == buttonCalibration) {
+    static uint32_t lastButtonCalMS = 0;
+    uint32_t elapsedButtonCal = nowMS - lastButtonCalMS;
+    if (elapsedButtonCal >= 250) {
+      (void) getButtonPressed();
+      lastButtonCalMS = nowMS;
+    }
+
   } else if (gameState == gameRunning) {
     //--------------------------------------------
     // GAME RUNNING
