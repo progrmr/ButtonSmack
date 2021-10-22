@@ -24,7 +24,7 @@
 //---------------------------------------------------------------
 #define DEBUG 1
 //#define CALIBRATE 1
-//#define PAROLA
+#define PAROLA
 
 #define nLEDs (8)
 #define kMaxLitLEDs (nLEDs/2)
@@ -39,13 +39,13 @@
 #include <MD_MAX72xx.h>
 #include <SPI.h>
 //#include "Parola_Fonts_data.h"
-#define HARDWARE_TYPE MD_MAX72XX::PAROLA_HW
-#define MAX_DEVICES 8
+#define HARDWARE_TYPE MD_MAX72XX::FC16_HW
+#define MAX_DEVICES 4
 #define CLK_PIN   13
 #define DATA_PIN  11
 #define CS_PIN    10
 #define kScoreUpdateIntervalMS (50)
-MD_Parola P = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
+MD_Parola P = MD_Parola(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
 #endif
 
 // Arduino pin definitions
@@ -121,13 +121,8 @@ void setup()
   }
 
 #ifdef PAROLA
-  P.begin(2);
-  P.setZone(0,0,3);
-  P.setZone(1,4,7);
-  P.displayZoneText(0, "abc", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-  P.setZoneEffect(0, true, PA_FLIP_UD);
-  P.displayZoneText(1, "abcd", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-  P.setZoneEffect(1, true, PA_FLIP_UD);
+  P.begin(1);         // 1 zone
+  P.displayText("WHAK", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
   P.displayAnimate();
 #endif
 
@@ -157,18 +152,38 @@ void loop()
     turnOnLED(0, nowMS);
     turnOnLED(1, nowMS);
     turnOnLED(2, nowMS);
+    
     tone(kSpeakerPin, 500, 800);
+#ifdef PAROLA
+    P.displayText("IN 3", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayAnimate();  
+#endif
     delay(1000);
     
     turnOffLED(2);
+    
     tone(kSpeakerPin, 1000, 700);
+#ifdef PAROLA
+    P.displayText("IN 2", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayAnimate();  
+#endif
     delay(1000);
     
     turnOffLED(1);
+    
     tone(kSpeakerPin, 1500, 500);
-    delay(1000);
+#ifdef PAROLA
+    P.displayText("IN 1", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayAnimate();  
+#endif
+   delay(1000);
     
     turnOffLED(0);
+#ifdef PAROLA
+    P.displayText("GO", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayAnimate();  
+#endif
+
     tone(kSpeakerPin, 2000, 100);
     delay(100);
     tone(kSpeakerPin, 2500, 100);
@@ -214,26 +229,18 @@ void loop()
     }
 
 #ifdef PAROLA
-    if (gameScore > escapedCount) {
-      P.displayZoneText(0, "Winner", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-      P.displayZoneText(1, "Loser",  PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    } else {
-      P.displayZoneText(0, "Loser",  PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-      P.displayZoneText(1, "Winner", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    }
+    P.displayText("DONE", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
     P.displayAnimate();  
-    delay(500);
+    delay(1000);
     
     char score1[8];
     sprintf(score1, "%d", gameScore);
-    char score2[8];
-    sprintf(score2, "%d", escapedCount);
     
-    P.displayZoneText(0, score1, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    P.displayZoneText(1, score2, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);    
+    P.displayText(score1, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
     P.displayAnimate();
+    delay(500);
 #endif   
-    
+
     delay(500);
 
   } else if (gameState == buttonCalibration) {
@@ -456,12 +463,9 @@ void loop()
       char score1[8];
       sprintf(score1, "%d", gameScore);
   
-      char score2[8];
-      sprintf(score2, "%d", escapedCount);
-  
-      P.displayZoneText(0, score1, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-      P.displayZoneText(1, score2, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      P.displayText(score1, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
       P.displayAnimate();
+      lastScoreUpdateMS = nowMS;
     }
  #endif
 
