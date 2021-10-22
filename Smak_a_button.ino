@@ -23,7 +23,7 @@
 // NOTE2: comment out the "#define DEBUG 1" line below for final deployment after testing is done.
 //---------------------------------------------------------------
 #define DEBUG 1
-#define CALIBRATE 1
+//#define CALIBRATE 1
 
 #define nLEDs (8)
 #define kMaxLitLEDs (nLEDs/2)
