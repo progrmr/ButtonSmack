@@ -1,4 +1,28 @@
 
+//---------------------------------------------------------------
+//
+// Single Player Whack-a-Mole style game 
+// designed to use 8 buttons and LED 8x8 matrix, see schematic
+//
+// this source:  https://github.com/progrmr/ButtonSmack
+// derived from:  https://github.com/DIYTechBros/ButtonSmack
+//
+// 10/21/2021 -- Gary Morris
+//
+// Instructions:
+//   1. Game Start: 3 LEDs will light up, then counts down 3, 2, 1, 
+//                  at each count it beeps and turns off 1 LED.  
+//                  When it gets to 0, there's a final short beep and the game starts.
+//   2. Game Play:  push button for the lit LED, you get a short beep if you hit
+//                  it in time and score a point.
+//   3. Game Ends:  after 60 seconds, all LEDs turn off, it beeps low tone for 2 seconds, game over.
+//   4. Restarting: after game is over, LEDs will do a fast sequence over and over.  
+//                  At this point press any button to start a new game
+//
+// NOTE: currently the LED matrix is not supported, this will be added soon
+//       for now the only visible score is on the serial output (if DEBUG is defined)
+// NOTE2: comment out the "#define DEBUG 1" line below for final deployment after testing is done.
+//---------------------------------------------------------------
 #define DEBUG 1
 
 #define nLEDs (8)
@@ -154,7 +178,9 @@ void loop()
       turnOnLED(i, nowMS);
       delay(100);
       turnOffLED(i);
+      delay(50);
     }
+    delay(500);
     
   } else if (gameState == gameRunning) {
     //--------------------------------------------
@@ -318,11 +344,11 @@ void loop()
         sprintf(debugMsg, "OOPS #%lu: button %d pressed, but LED not lit", oopsCount, whichButton);
         Serial.println(debugMsg);
 #endif        
-        // sad sound beep, two descending low pitched tones
-        const int kBeepDuration = 80;
-        tone(kSpeakerPin, 300, kBeepDuration);
-        delay(kBeepDuration);
-        tone(kSpeakerPin, 200, kBeepDuration);
+//        // sad sound beep, two descending low pitched tones
+//        const int kBeepDuration = 80;
+//        tone(kSpeakerPin, 300, kBeepDuration);
+//        delay(kBeepDuration);
+//        tone(kSpeakerPin, 200, kBeepDuration);
       }
     }
     
