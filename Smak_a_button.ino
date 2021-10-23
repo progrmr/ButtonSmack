@@ -8,18 +8,18 @@
 //
 // 10/21/2021 -- Gary Morris
 //
-// Instructions:
-//   1. Game Start: 3 LEDs will light up, then counts down 3, 2, 1, 
+// The game program has 4 states.  Initially it will be in state #1 described below. 
+// 
+//   1. Game Ready: LEDs will cycle through a fast sequence once per second, 
+//                  press any button to start a game (state #2).  
+//   2. Game Starting: 3 LEDs will light up, then counts down 3, 2, 1, 
 //                  at each count it beeps and turns off 1 LED.  
-//                  When it gets to 0, there's a final short beep and the game starts.
-//   2. Game Play:  push button for the lit LED, you get a short beep if you hit
-//                  it in time and score a point.
-//   3. Game Ends:  after 60 seconds, all LEDs turn off, it beeps low tone for 2 seconds, game over.
-//   4. Restarting: after game is over, LEDs will do a fast sequence over and over.  
-//                  At this point press any button to start a new game
+//                  When it gets to 0, there's a final short beep and game starts (state #3).
+//   3. Game Running: LEDs will light up at random, push button for the lit LED, you get a short beep if you hit
+//                  it in time and score a point.  Displays score and time clock.  
+//                  After 60 seconds, game ends, all LEDs off, goes to state #4.
+//   4. Game Over:  Displays final score for 10 seconds, then it goes back to state #1 above.
 //
-// NOTE: currently the LED matrix is not supported, this will be added soon
-//       for now the only visible score is on the serial output (if DEBUG is defined)
 // NOTE2: comment out the "#define DEBUG 1" line below for final deployment after testing is done.
 //---------------------------------------------------------------
 #define DEBUG 1
@@ -59,8 +59,8 @@ uint16_t buttonValues[nLEDs] = {920, 451, 295, 215, 165, 130, 99, 65};
 uint16_t buttonTolerance[nLEDs] = {0};    // computed
 
 // Game State and scoring data
-enum GameState {gameNotStarted, gameRunning, gameOver, buttonCalibration};
-GameState gameState = gameNotStarted;
+typedef enum GameStates {gameReady, gameStarting, gameRunning, gameOver, buttonCalibration};
+GameStates gameState = gameReady;
 uint32_t gameStateMS = 0;     // time that game state changed
 uint32_t gameScore = 0;       // hit button while it was lit
 uint32_t missedCount = 0;     // hit a button that wasn't lit
@@ -125,8 +125,8 @@ void setup()
   P.begin(2);         // 1 zone
   P.setZone(1,0,1);
   P.setZone(0,2,3);
-  P.displayZoneText(0, "W", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-  P.displayZoneText(1, "M", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+  P.displayZoneText(0, "Wak", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+  P.displayZoneText(1, "Mol", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
   P.displayAnimate();
 #endif
 
@@ -135,21 +135,23 @@ void setup()
 #ifdef CALIBRATE
   gameState = buttonCalibration;
 #else 
-  gameState = gameNotStarted;
+  gameState = gameReady;
 #endif
 
   lastSpeedChangeMS = nowMS;
 }
 
+static uint32_t nowMS = 0;
+
 void loop()
 {
-  uint32_t nowMS = millis();
+  nowMS = millis();
   uint32_t elapsedInStateMS = nowMS - gameStateMS;
   
   //---------------------------------------------
   // Perform game action based on game state
   //
-  if (gameState == gameNotStarted) {
+  if (gameState == gameStarting) {
     //--------------------------------------------
     // NEW GAME STARTING
     //--------------------------------------------
@@ -169,7 +171,6 @@ void loop()
     
     tone(kSpeakerPin, 1000, 700);
 #ifdef PAROLA
-    P.displayZoneText(0, "IN", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
     P.displayZoneText(1, "2", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
     P.displayAnimate();  
 #endif
@@ -179,27 +180,19 @@ void loop()
     
     tone(kSpeakerPin, 1500, 500);
 #ifdef PAROLA
-    P.displayZoneText(0, "IN", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
     P.displayZoneText(1, "1", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
     P.displayAnimate();  
 #endif
-   delay(1000);
+    delay(900);
     
-    turnOffLED(0);
-#ifdef PAROLA
-    P.displayZoneText(0, "GO", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    P.displayZoneText(1, "GO", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    P.displayAnimate();  
-#endif
-
     tone(kSpeakerPin, 2000, 100);
     delay(100);
+    turnOffLED(0);
     tone(kSpeakerPin, 2500, 100);
     
     // reset all the game state variables
     nowMS = millis();
-    gameState = gameRunning;
-    gameStateMS = nowMS;
+    goNextGameState();
     gameScore = 0;
     oopsCount = 0;
     missedCount = 0;
@@ -210,7 +203,47 @@ void loop()
     maxTimeLitMS = kInitialLEDLitMS;
     totalReactionTimeMS = 0;
     totalReactionCount = 0;
+
+  } else if (gameState == gameReady) {
+     //--------------------------------------------
+    // GAME READY
+    //---------------------------------------------
+#ifdef PAROLA
+    P.displayZoneText(0, "GO", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayZoneText(1, "??", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayAnimate();
+#endif   
+
+    int flash = 0;
+    int maxFlash = nLEDs + 10;   // flash each LEDs then delay 10 times before next flash
     
+    while (1) {
+      if (flash < nLEDs) {
+        turnOnLED(flash, 0);
+      }
+      
+      delay(50);
+      if (getButtonPressed() != kInvalid) break;
+      delay(50);
+      if (getButtonPressed() != kInvalid) break;
+
+      if (flash < nLEDs) {
+        turnOffLED(flash);
+      }
+      
+      flash = (flash >= maxFlash) ? 0 : flash+1;
+    }
+#ifdef DEBUG
+    Serial.println(F("Starting Game"));
+#endif
+   
+    // turn off all LEDs, ready to start game
+    for (int i=0; i<nLEDs; i++) {
+      turnOffLED(i);
+    }
+
+    goNextGameState();
+
   } else if (gameState == gameOver) {
     //--------------------------------------------
     // GAME OVER
@@ -220,33 +253,21 @@ void loop()
     Serial.println(debugMsg);
 #endif
 
-    for (int i=0; i<nLEDs; i++) {
-      if (gameState == gameOver) {
-        // check for button presses to start a new game
-        int whichButton = getButtonPressed();
-        if (whichButton != kInvalid) {
-          gameState = gameNotStarted;
-        }
-      }
+    if (elapsedInStateMS >= 10000) {
+      // we've display the final score for 10 seconds, time to move onto next state
+      goNextGameState();
       
-      // flash the next LED in sequence
-      turnOnLED(i, nowMS);
-      delay(100);
-      turnOffLED(i);
-      delay(50);
-    }
-
+    } else {
 #ifdef PAROLA
-    char score1[8];
-    sprintf(score1, "%d", gameScore);
+      char score1[8];
+      sprintf(score1, "%d", gameScore);
     
-    P.displayZoneText(0, score1, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    P.displayZoneText(1, "HIT", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    P.displayAnimate();
-    delay(500);
+      P.displayZoneText(0, score1, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      P.displayZoneText(1, "HIT", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      P.displayAnimate();
 #endif   
-
-    delay(500);
+      delay(500);
+    }
 
   } else if (gameState == buttonCalibration) {
     //--------------------------------------------
@@ -266,8 +287,7 @@ void loop()
     // check to see if it's time to end the game
     if (elapsedInStateMS >= GameTimeLimitMS) {
       // time to end the game
-      gameState = gameOver;
-      gameStateMS = nowMS;
+      goNextGameState();
       
       // turn off all LEDs, game over
       for (int i=0; i<nLEDs; i++) {
@@ -484,6 +504,36 @@ void loop()
   
 }  // end loop()
 
+//-------------------------------------------------------------------------
+// manage transitions throught the various GameStates
+//
+// enum GameState {gameReady, gameStarting, gameRunning, gameOver, buttonCalibration};
+//
+void goNextGameState() {
+  GameStates newState = gameState;
+  
+  switch (gameState) {
+    case gameReady:     
+      newState = gameStarting;
+      break;
+    case gameStarting:  
+      newState = gameRunning;
+      break;
+    case gameRunning:   
+      newState = gameOver;
+      break;
+    case gameOver:      
+      newState = gameReady;
+      break;
+    default:
+      break;
+  }
+  if (newState != gameState) {
+    nowMS = millis();
+    gameStateMS = nowMS;
+  }
+  gameState = newState;
+}
 
 // reads the button port to figure out which button is pressed
 // returns the button number from 0 to N-1,
