@@ -122,8 +122,11 @@ void setup()
   }
 
 #ifdef PAROLA
-  P.begin(1);         // 1 zone
-  P.displayText("WHAK", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+  P.begin(2);         // 1 zone
+  P.setZone(1,0,1);
+  P.setZone(0,2,3);
+  P.displayZoneText(0, "W", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+  P.displayZoneText(1, "M", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
   P.displayAnimate();
 #endif
 
@@ -156,7 +159,8 @@ void loop()
     
     tone(kSpeakerPin, 500, 800);
 #ifdef PAROLA
-    P.displayText("IN 3", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayZoneText(0, "IN", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayZoneText(1, "3", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
     P.displayAnimate();  
 #endif
     delay(1000);
@@ -165,7 +169,8 @@ void loop()
     
     tone(kSpeakerPin, 1000, 700);
 #ifdef PAROLA
-    P.displayText("IN 2", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayZoneText(0, "IN", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayZoneText(1, "2", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
     P.displayAnimate();  
 #endif
     delay(1000);
@@ -174,14 +179,16 @@ void loop()
     
     tone(kSpeakerPin, 1500, 500);
 #ifdef PAROLA
-    P.displayText("IN 1", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayZoneText(0, "IN", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayZoneText(1, "1", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
     P.displayAnimate();  
 #endif
    delay(1000);
     
     turnOffLED(0);
 #ifdef PAROLA
-    P.displayText("GO", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayZoneText(0, "GO", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayZoneText(1, "GO", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
     P.displayAnimate();  
 #endif
 
@@ -230,14 +237,11 @@ void loop()
     }
 
 #ifdef PAROLA
-    P.displayText("DONE", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    P.displayAnimate();  
-    delay(1000);
-    
     char score1[8];
     sprintf(score1, "%d", gameScore);
     
-    P.displayText(score1, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayZoneText(0, score1, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P.displayZoneText(1, "HIT", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
     P.displayAnimate();
     delay(500);
 #endif   
@@ -461,10 +465,16 @@ void loop()
     uint32_t elapsedSinceScoreUpdateMS = nowMS - lastScoreUpdateMS;
     
     if (elapsedSinceScoreUpdateMS >= kScoreUpdateIntervalMS) {
-      char score1[8];
-      sprintf(score1, "%d", gameScore);
-  
-      P.displayText(score1, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      char score[8];
+      sprintf(score, "%lu", gameScore);
+
+      char timeClock[8];
+      uint32_t secsLeftMS = GameTimeLimitMS - elapsedInStateMS;
+      unsigned long secsLeftL = lroundf(secsLeftMS / 1000.0);
+      sprintf(timeClock, "%lu", secsLeftL);
+
+      P.displayZoneText(0, score, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      P.displayZoneText(1, timeClock, PA_RIGHT, 0, 0, PA_PRINT, PA_NO_EFFECT);
       P.displayAnimate();
       lastScoreUpdateMS = nowMS;
     }
