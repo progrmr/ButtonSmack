@@ -31,7 +31,7 @@
 #define GameTimeLimitMS (60 * 1000UL)      // 60,000 ms == 60 seconds
 #define kInitialLEDLitMS (2000UL)
 #define kInvalid (-1)
-#define kSwitchBounceMS (20)    // source: https://www.eejournal.com/article/ultimate-guide-to-switch-debounce-part-4/
+#define kSwitchBounceMS (10)    // source: https://www.eejournal.com/article/ultimate-guide-to-switch-debounce-part-4/
 
 #ifdef PAROLA
 #include <stdio.h>
@@ -55,8 +55,12 @@ MD_Parola P = MD_Parola(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
 const int ledPins[nLEDs] = {2,3,4,5,6,7,8,9};
 
 // input button(s) voltage values
-uint16_t buttonValues[nLEDs] = {920, 451, 295, 215, 165, 130, 99, 65};
-uint16_t buttonTolerance[nLEDs] = {0};    // computed
+int buttonValues[nLEDs] = {920, 451, 295, 215, 165, 130, 99, 65};
+int buttonTolerance[nLEDs] = {0};    // computed
+
+// track actual readings so we can auto-recalibrate button voltage values
+uint32_t nButtonValueReadings = 0;    
+uint32_t totalButtonValue = 0;
 
 // Game State and scoring data
 typedef enum GameStates {gameReady, gameStarting, gameRunning, gameOver, buttonCalibration};
@@ -75,8 +79,11 @@ char debugMsg[120];
 uint32_t timeLitLEDMS[nLEDs] = {0};       // time when the LED was turned on
 uint32_t maxTimeLitMS = kInitialLEDLitMS; // maximum amount of time to keep LED on (if not hit)
 
-uint32_t buttonChangeMS[nLEDs] = {0};     // time that buttons last changed up/down state (for debouncing)
-bool buttonIsDown[nLEDs] = {false};       // remember which buttons are down
+//uint32_t buttonChangeMS[nLEDs] = {0};     // time that buttons last changed up/down state (for debouncing)
+//bool buttonIsDown[nLEDs] = {false};       // remember which buttons are down
+int buttonDownID = kInvalid;                // current button pressed
+int handledButtonID = kInvalid;                // last button processed
+uint32_t buttonDownMS = 0;
 
 uint32_t totalReactionTimeMS = 0;         // total time (ms) that it took player to correctly hit a button
 uint32_t totalReactionCount = 0;          // total number of times player correctly hit a button
@@ -105,22 +112,10 @@ void setup()
   for (int i=0; i<nLEDs; i++) {
     pinMode(ledPins[i], OUTPUT);
     turnOffLED(i);
-
-    // calculate buttonTolerance so we can tell which button was pressed
-    if (i < nLEDs-1) {
-      buttonTolerance[i] = (buttonValues[i] - buttonValues[i+1]) / 2;
-    } else {
-      buttonTolerance[i] = buttonTolerance[i-1];
-    }    
-#ifdef DEBUG
-    sprintf(debugMsg, "button %d, nominal: %3d, tol: +/-%3d, min: %3d, max: %3d", 
-                       i, buttonValues[i], buttonTolerance[i], 
-                       buttonValues[i]-buttonTolerance[i],
-                       buttonValues[i]+buttonTolerance[i]);
-    Serial.println(debugMsg);
-#endif
   }
 
+  calculateButtonTolerance();
+  
 #ifdef PAROLA
   P.begin(2);         // 1 zone
   P.setZone(1,0,1);
@@ -269,16 +264,46 @@ void loop()
       delay(500);
     }
 
+#ifdef CALIBRATE
   } else if (gameState == buttonCalibration) {
     //--------------------------------------------
     // BUTTON CALIBRATION CHECK
     //--------------------------------------------
     static uint32_t lastButtonCalMS = 0;
+    static int litLEDId = kInvalid;
+    
     uint32_t elapsedButtonCal = nowMS - lastButtonCalMS;
-    if (elapsedButtonCal >= 250) {
-      (void) getButtonPressed();
+    if (elapsedButtonCal >= 200) {
+      int analogVal = analogRead(kButtonPin);
+      int buttonId = buttonForAnalogValue(analogVal);
+      analogVal = (analogVal / 5) * 5;      // round to nearest 5 count
       lastButtonCalMS = nowMS;
+
+      if (buttonId != litLEDId) {
+        if (litLEDId != kInvalid) {
+          turnOffLED(litLEDId);       // turn off previously lit LED
+        }
+        turnOnLED(buttonId, millis());
+        litLEDId = buttonId;
+      }
+
+#ifdef PAROLA
+      char buttonStr[8];
+      char analogStr[8];
+      if (buttonId != kInvalid) {
+        sprintf(buttonStr, "%d", buttonId);
+      } else {
+        strcpy(buttonStr, "-");
+      }
+      sprintf(analogStr, "%d", analogVal);
+      
+      P.displayZoneText(0, buttonStr, PA_LEFT, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      P.displayZoneText(1, analogStr, PA_RIGHT, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      P.displayAnimate();
+#endif   
     }
+
+#endif
 
   } else if (gameState == gameRunning) {
     //--------------------------------------------
@@ -362,43 +387,78 @@ void loop()
       lastActionMS = nowMS;
     }
 
-    // check for button presses
-    int whichButton = getButtonPressed();
-
-    // check to see if buttons released or pressed, 
-    // also check to see if these changes are switch bounces
-    for (int i=0; i<nLEDs; i++) {
-      // if button change happened too soon, it is switch bounce
-      const bool isDown = (i==whichButton);
-      const bool buttonChanged = isDown != buttonIsDown[i];
-      if (buttonChanged) {
-        const uint32_t elapsedChangeMS = nowMS - buttonChangeMS[i];
-        if (elapsedChangeMS <= kSwitchBounceMS) { 
-          // bounce detected, ignore this change
-          if (i==whichButton) {
-            whichButton = kInvalid;   // ignore button down, it's a bounce detected
-          }
-        } else {
-          // change is not a switch bounce
-          buttonIsDown[i] = isDown;
-          buttonChangeMS[i] = nowMS;
-        }
-      }
+    //-------------------------------------------------------------------
+    // check for button presses - ignore bounces and duplicates
+    //-------------------------------------------------------------------
+    const int buttonValue = analogRead(kButtonPin);
+    int whichButton = buttonForAnalogValue(buttonValue);
+    
+    if (whichButton == kInvalid) {
+      // all buttons are up, none down
+      recalibrateButtonValues();
       
-      if (!buttonChanged && isDown) {
-        // button is still down, ignore this button press, it's not new
-        whichButton = kInvalid;
-#ifdef DEBUG
-        //Serial.println(F("*** ignoring button still down"));
-#endif
-     }
-    }
+      buttonDownID = kInvalid;
+      buttonDownMS = nowMS;
+      handledButtonID = kInvalid;
+      nButtonValueReadings = 0;
+      totalButtonValue = 0;
 
-    // check to see if the button was already down,
-    // we are only interested in a transition from up to down
+    } else {
+      // a button IS currently down
+      if (whichButton == buttonDownID) {
+        // same button still being pressed
+        const uint32_t elapsedChangeMS = nowMS - buttonDownMS;
+        if (elapsedChangeMS <= kSwitchBounceMS) {
+          // button down not yet steady, still bouncing, ignore
+          whichButton = kInvalid;   // ignore button down, it hasn't been long enough to be valid
+#ifdef DEBUG
+          sprintf(debugMsg, "--- button %d only down for %lu ms", buttonDownID, elapsedChangeMS);
+          Serial.println(debugMsg);
+#endif
+        } else {
+          // button has been down long enough, not a bounce, this is a steady button press
+          if (whichButton == handledButtonID) {
+            // button has already been handled, don't handle it again, ignore it
+            whichButton = kInvalid;
+#ifdef DEBUG
+            Serial.println(F("--- same button still pressed, already handled, ignoring"));
+#endif         
+         } else {
+            // valid button down, not a bounce
+            // remember which button has been handled
+            handledButtonID = whichButton; 
+          }
+        }
+        
+      } else {
+        // different button pressed, restart button tracking
+        recalibrateButtonValues();
+        
+        buttonDownID = whichButton;
+        buttonDownMS = nowMS;
+        whichButton = kInvalid;     // don't handle it now, we have to wait for debouncing time
+        handledButtonID = kInvalid;
+        nButtonValueReadings = 0;
+        totalButtonValue = 0;
+      } // end if isSameButton
+
+      // keep track of the button values that we have seen for the button that is down
+      nButtonValueReadings++;
+      totalButtonValue += buttonValue;
+#ifdef DEBUG
+//      int average = totalButtonValue / nButtonValueReadings;
+//      sprintf(debugMsg, "--- button %d seen %lux, value %d average: %d (was %d)",
+//              buttonDownID, nButtonValueReadings, buttonValue, average, buttonValues[buttonDownID]);
+//      Serial.println(debugMsg);
+#endif
+    } // end button is down
+
+    //------------------------------------------------------
+    // if whichButton is still valid at this point, 
+    // then we have a new debounced button press to handle
+    //------------------------------------------------------
+
     if (whichButton != kInvalid) {
-      // button was up last time, now it is down, valid transition
-      // we have a valid button press (not a bounce)
 #ifdef DEBUG
       Serial.println(F("+++ valid button press"));
 #endif
@@ -441,11 +501,6 @@ void loop()
         sprintf(debugMsg, "OOPS #%lu: button %d pressed, but LED not lit", oopsCount, whichButton);
         Serial.println(debugMsg);
 #endif        
-//        // sad sound beep, two descending low pitched tones
-//        const int kBeepDuration = 80;
-//        tone(kSpeakerPin, 300, kBeepDuration);
-//        delay(kBeepDuration);
-//        tone(kSpeakerPin, 200, kBeepDuration);
       }
     }
     
@@ -535,17 +590,24 @@ void goNextGameState() {
   gameState = newState;
 }
 
-// reads the button port to figure out which button is pressed
-// returns the button number from 0 to N-1,
+// given the analog port reading figures out which button is pressed
+// returns the button number from 0 to nLEDs-1,
 // if no buttons are pressed returns kInvalid
 int getButtonPressed() {
   // check to see which button is pressed (if any)
-  uint16_t analogValue = analogRead(kButtonPin);
+  int analogValue = analogRead(kButtonPin);
 
+  return buttonForAnalogValue(analogValue);
+}
+
+// given the analog port reading figures out which button is pressed
+// returns the button number from 0 to N-1,
+// if no buttons are pressed returns kInvalid
+int buttonForAnalogValue(int analogValue) {
   for (int i=0; i<nLEDs; i++) {
-    uint16_t tolerance = buttonTolerance[i];
-    uint16_t minValue = buttonValues[i] - tolerance;
-    uint16_t maxValue = buttonValues[i] + tolerance;
+    int tolerance = buttonTolerance[i];
+    int minValue = buttonValues[i] - tolerance;
+    int maxValue = buttonValues[i] + tolerance;
 
     bool isPressed = ( analogValue >= minValue and analogValue <= maxValue );
     if (isPressed) {
@@ -557,7 +619,42 @@ int getButtonPressed() {
       return i;
     }
   }
-  return kInvalid;      // no button is pressed
+  return kInvalid;      // no button is pressed  
+}
+
+void recalibrateButtonValues() {
+  if (nButtonValueReadings >= 3) {
+    int averageValue = totalButtonValue / nButtonValueReadings;
+    int expectedValue = buttonValues[buttonDownID];
+    
+    if (abs(averageValue-expectedValue) >= 2) {
+      buttonValues[buttonDownID] = (averageValue+expectedValue)/2;
+#ifdef DEBUG
+      sprintf(debugMsg, "*** recalibrate: button %d seen %lux, averages %d (expected %d), new value %d",
+            buttonDownID, nButtonValueReadings, averageValue, expectedValue, buttonValues[buttonDownID]);
+      Serial.println(debugMsg);
+#endif
+      calculateButtonTolerance();
+    }
+  }
+}
+
+void calculateButtonTolerance() {
+  for (int i=0; i<nLEDs; i++) {
+    // calculate buttonTolerance so we can tell which button was pressed
+    if (i < nLEDs-1) {
+      buttonTolerance[i] = (buttonValues[i] - buttonValues[i+1]) / 2;
+    } else {
+      buttonTolerance[i] = buttonTolerance[i-1];
+    }    
+#ifdef DEBUG
+    sprintf(debugMsg, "--- button %d, nominal: %3d, tol: +/-%3d, min: %3d, max: %3d", 
+                       i, buttonValues[i], buttonTolerance[i], 
+                       buttonValues[i]-buttonTolerance[i],
+                       buttonValues[i]+buttonTolerance[i]);
+    Serial.println(debugMsg);
+#endif
+  }
 }
 
 unsigned nLEDsLit() {
