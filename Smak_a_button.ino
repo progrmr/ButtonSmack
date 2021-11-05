@@ -22,12 +22,14 @@
 //
 // NOTE2: comment out the "#define DEBUG 1" line below for final deployment after testing is done.
 //---------------------------------------------------------------
-#define DEBUG 1
+//#define DEBUG 1
 //#define CALIBRATE 1
 #define PAROLA
 
+const char* const title = "Lucas";
+
 #define nLEDs (8)
-#define kMaxLitLEDs (nLEDs/2)
+#define kMaxLitLEDs (2)
 #define GameTimeLimitMS (60 * 1000UL)      // 60,000 ms == 60 seconds
 #define kInitialLEDLitMS (2000UL)
 #define kInvalid (-1)
@@ -46,7 +48,7 @@
 #define DATA_PIN  11
 #define CS_PIN    10
 #define kScoreUpdateIntervalMS (50)
-MD_Parola P = MD_Parola(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
+MD_Parola* P = NULL;
 #endif
 
 // Arduino pin definitions
@@ -116,15 +118,6 @@ void setup()
 
   calculateButtonTolerance();
   
-#ifdef PAROLA
-  P.begin(2);         // 1 zone
-  P.setZone(1,0,1);
-  P.setZone(0,2,3);
-  P.displayZoneText(0, "Wak", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-  P.displayZoneText(1, "Mol", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-  P.displayAnimate();
-#endif
-
   uint32_t nowMS = millis();
   gameStateMS = nowMS; 
 #ifdef CALIBRATE
@@ -156,9 +149,13 @@ void loop()
     
     tone(kSpeakerPin, 500, 800);
 #ifdef PAROLA
-    P.displayZoneText(0, "IN", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    P.displayZoneText(1, "3", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    P.displayAnimate();  
+    if (P == NULL) {
+      P = new MD_Parola(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
+      P->begin(1);         // 1 zones
+      P->setZone(0,0,3);
+    }
+    P->displayZoneText(0, "Ready", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P->displayAnimate();  
 #endif
     delay(1000);
     
@@ -166,8 +163,8 @@ void loop()
     
     tone(kSpeakerPin, 1000, 700);
 #ifdef PAROLA
-    P.displayZoneText(1, "2", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    P.displayAnimate();  
+    P->displayZoneText(0, "Set", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P->displayAnimate();  
 #endif
     delay(1000);
     
@@ -175,8 +172,8 @@ void loop()
     
     tone(kSpeakerPin, 1500, 500);
 #ifdef PAROLA
-    P.displayZoneText(1, "1", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    P.displayAnimate();  
+    P->displayZoneText(0, "Go!", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+    P->displayAnimate();  
 #endif
     delay(900);
     
@@ -204,15 +201,32 @@ void loop()
     // GAME READY
     //---------------------------------------------
 #ifdef PAROLA
-    P.displayZoneText(0, "GO", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    P.displayZoneText(1, "??", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-    P.displayAnimate();
+    if (P == NULL) {
+      P = new MD_Parola(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
+      P->begin(1);         // 1 zone
+      P->setZone(0,0,3);   // zone uses segment 0..3
+    }
 #endif   
 
     int flash = 0;
     int maxFlash = nLEDs + 10;   // flash each LEDs then delay 10 times before next flash
     
-    while (1) {
+    while (1) {      
+#ifdef PAROLA
+      elapsedInStateMS = millis() - gameStateMS;
+      static uint32_t prevElapsedSec = 9999;
+      uint32_t elapsedSec = elapsedInStateMS / 1000;
+      if (prevElapsedSec != elapsedSec) {
+        if (elapsedSec % 4 == 0) {
+          P->displayZoneText(0, title, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+        } else if (elapsedSec % 4 == 2) {
+          P->displayZoneText(0, "Go ?", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+        }
+        P->displayAnimate(); 
+        prevElapsedSec = elapsedSec;         
+      }
+#endif
+
       if (flash < nLEDs) {
         turnOnLED(flash, 0);
       }
@@ -227,7 +241,10 @@ void loop()
       }
       
       flash = (flash >= maxFlash) ? 0 : flash+1;
-    }
+
+
+    } // end while (1)
+    
 #ifdef DEBUG
     Serial.println(F("Starting Game"));
 #endif
@@ -254,12 +271,17 @@ void loop()
       
     } else {
 #ifdef PAROLA
-      char score1[8];
-      sprintf(score1, "%d", gameScore);
+      if (P == NULL) {
+        P = new MD_Parola(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
+        P->begin(1);         // 2 zones
+        P->setZone(0,0,3);
+      }
     
-      P.displayZoneText(0, score1, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-      P.displayZoneText(1, "HIT", PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-      P.displayAnimate();
+      char score1[12];
+      sprintf(score1, "%d Hit", gameScore);
+    
+      P->displayZoneText(0, score1, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      P->displayAnimate();
 #endif   
       delay(500);
     }
@@ -288,6 +310,13 @@ void loop()
       }
 
 #ifdef PAROLA
+      if (P == NULL) {
+        P = new MD_Parola(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
+        P->begin(2);         // 2 zones
+        P->setZone(1,0,1);
+        P->setZone(0,2,3);
+      }
+    
       char buttonStr[8];
       char analogStr[8];
       if (buttonId != kInvalid) {
@@ -297,9 +326,9 @@ void loop()
       }
       sprintf(analogStr, "%d", analogVal);
       
-      P.displayZoneText(0, buttonStr, PA_LEFT, 0, 0, PA_PRINT, PA_NO_EFFECT);
-      P.displayZoneText(1, analogStr, PA_RIGHT, 0, 0, PA_PRINT, PA_NO_EFFECT);
-      P.displayAnimate();
+      P->displayZoneText(0, buttonStr, PA_LEFT, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      P->displayZoneText(1, analogStr, PA_RIGHT, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      P->displayAnimate();
 #endif   
     }
 
@@ -360,7 +389,7 @@ void loop()
       } else if (totalReactionCount >= 3 && oopsCount == 0) {
         // shorten LED on time, change them to
         // halfway between current and reactionTimeMS
-        uint32_t reactionTimeMS = totalReactionTimeMS / totalReactionCount;
+        uint32_t reactionTimeMS = (totalReactionTimeMS / totalReactionCount) + 100;  // allow an extra 100ms above reaction time
         uint32_t newTimeLitMS = (reactionTimeMS + maxTimeLitMS) / 2;
         if (newTimeLitMS < maxTimeLitMS && newTimeLitMS >= kSwitchBounceMS*3) {
 #ifdef DEBUG
@@ -420,9 +449,6 @@ void loop()
           if (whichButton == handledButtonID) {
             // button has already been handled, don't handle it again, ignore it
             whichButton = kInvalid;
-#ifdef DEBUG
-            Serial.println(F("--- same button still pressed, already handled, ignoring"));
-#endif         
          } else {
             // valid button down, not a bounce
             // remember which button has been handled
@@ -536,6 +562,13 @@ void loop()
 #endif
 
 #ifdef PAROLA
+    if (P == NULL) {
+      P = new MD_Parola(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
+      P->begin(2);         // 2 zones
+      P->setZone(1,0,1);
+      P->setZone(0,2,3);
+    }
+    
     static uint32_t lastScoreUpdateMS = 0;
     uint32_t elapsedSinceScoreUpdateMS = nowMS - lastScoreUpdateMS;
     
@@ -548,9 +581,9 @@ void loop()
       unsigned long secsLeftL = lroundf(secsLeftMS / 1000.0);
       sprintf(timeClock, "%lu", secsLeftL);
 
-      P.displayZoneText(0, score, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
-      P.displayZoneText(1, timeClock, PA_RIGHT, 0, 0, PA_PRINT, PA_NO_EFFECT);
-      P.displayAnimate();
+      P->displayZoneText(0, score, PA_CENTER, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      P->displayZoneText(1, timeClock, PA_RIGHT, 0, 0, PA_PRINT, PA_NO_EFFECT);
+      P->displayAnimate();
       lastScoreUpdateMS = nowMS;
     }
  #endif
@@ -586,6 +619,11 @@ void goNextGameState() {
   if (newState != gameState) {
     nowMS = millis();
     gameStateMS = nowMS;
+    
+    if (P != NULL) {
+      free(P);
+    }
+    P = NULL;
   }
   gameState = newState;
 }
