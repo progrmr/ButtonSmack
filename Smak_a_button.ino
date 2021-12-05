@@ -22,18 +22,19 @@
 //
 // NOTE2: comment out the "#define DEBUG 1" line below for final deployment after testing is done.
 //---------------------------------------------------------------
-//#define DEBUG 1
+#define DEBUG 1
 //#define CALIBRATE 1
 #define PAROLA
 
 const char* const title = "Lucas";
 
 #define nLEDs (8)
-#define kMaxLitLEDs (2)
+#define kMaxLitLEDs (1)
 #define GameTimeLimitMS (60 * 1000UL)      // 60,000 ms == 60 seconds
-#define kInitialLEDLitMS (2000UL)
+#define kInitialLEDLitMS (5000UL)
 #define kInvalid (-1)
 #define kSwitchBounceMS (10)    // source: https://www.eejournal.com/article/ultimate-guide-to-switch-debounce-part-4/
+#define MatchReactionTime false
 
 #ifdef PAROLA
 #include <stdio.h>
@@ -86,6 +87,7 @@ uint32_t maxTimeLitMS = kInitialLEDLitMS; // maximum amount of time to keep LED 
 int buttonDownID = kInvalid;                // current button pressed
 int handledButtonID = kInvalid;                // last button processed
 uint32_t buttonDownMS = 0;
+int lastButtonScored = kInvalid;            // remember last scoring button so we don't repeat same button in a row
 
 uint32_t totalReactionTimeMS = 0;         // total time (ms) that it took player to correctly hit a button
 uint32_t totalReactionCount = 0;          // total number of times player correctly hit a button
@@ -386,7 +388,7 @@ void loop()
         maxTimeLitMS = newTimeLitMS;
         oopsCount = 0;    
 
-      } else if (totalReactionCount >= 3 && oopsCount == 0) {
+      } else if (MatchReactionTime && totalReactionCount >= 3 && oopsCount == 0) {
         // shorten LED on time, change them to
         // halfway between current and reactionTimeMS
         uint32_t reactionTimeMS = (totalReactionTimeMS / totalReactionCount) + 100;  // allow an extra 100ms above reaction time
@@ -408,8 +410,9 @@ void loop()
     bool changedLEDs = false;
     
     if (actionElapsedMS >= actionIntervalMS && nLEDsLit() < kMaxLitLEDs) {
-      // randomly pick one of the off LEDs to light up next
-      int which = pickRandomOffLED();
+      // randomly pick one of the off LEDs to light up next,
+      // except don't pick the same one they just hit and scored on
+      int which = pickRandomOffLED(lastButtonScored); 
       
       turnOnLED(which, nowMS);
       changedLEDs = true;
@@ -496,7 +499,8 @@ void loop()
         uint32_t reactionTimeMS = nowMS - timeLitLEDMS[whichButton];
         totalReactionTimeMS += reactionTimeMS;
         totalReactionCount++;
-
+        lastButtonScored = whichButton;
+        
         turnOffLED(whichButton);
         gameScore++;
         oopsCount = 0;    // reset oops score
@@ -705,22 +709,29 @@ unsigned nLEDsLit() {
   return nLit;
 }
 
-int pickRandomOffLED() {
+int pickRandomOffLED(int exceptLED) {
   // randomly choose an LED from the LEDs that are OFF
   const int nLEDsOff = nLEDs - nLEDsLit();
   if (nLEDsOff == 0) return 0;      // none of them are off !?!
-  
-  const int pick = random(0,nLEDsOff);       // pick one of the OFF LEDs
-  
-  int curOffLED = 0;
-  for (int i=0; i<nLEDs; i++) {
-    if (!isOnLED(i)) {
-      if (curOffLED == pick) {
-        return i;
+
+  int retriesLeft = nLEDs;
+  int chosenLED = 0;
+  do {
+    int pick = random(0,nLEDsOff);       // pick one of the OFF LEDs
+    int curOffLED = 0;
+    for (int i=0; i<nLEDs; i++) {
+      if (!isOnLED(i)) {
+        if (curOffLED == pick) {
+          chosenLED = i;
+          break;
+        }
+        curOffLED++;
       }
-      curOffLED++;
     }
-  }
+    retriesLeft--;    // limit do loop
+  } while (chosenLED == exceptLED && retriesLeft > 0);
+
+  return chosenLED;
 }
 
 boolean isOnLED(int which) {
